@@ -1652,6 +1652,74 @@ def test_get_stacktrace():
         assert stacktrace is None
 
 
+def test_show_stacktrace_default_is_false():
+    """
+    Regression test for CVE-2023-39264.
+
+    The default value of ``SHOW_STACKTRACE`` in ``superset/config.py`` must
+    remain ``False`` so that REST API error responses do not leak server-side
+    tracebacks, file paths, or library versions to unauthenticated callers.
+    Exposing tracebacks is strictly an opt-in development affordance.
+    """
+    # Import the raw module-level default rather than ``current_app.config``
+    # so the test fails if someone flips the documented default in config.py,
+    # regardless of any per-test overrides applied to the app fixture.
+    from superset import config as superset_config
+
+    assert superset_config.SHOW_STACKTRACE is False
+
+
+def test_get_error_msg_hides_traceback_when_show_stacktrace_false():
+    """
+    Regression test for CVE-2023-39264.
+
+    When ``SHOW_STACKTRACE`` is ``False`` (the secure default), the payload
+    returned by ``superset.views.base.get_error_msg`` — which is rendered into
+    REST API error responses by ``handle_api_exception`` — must return a
+    generic message and must NOT contain any traceback content.
+    """
+    from superset.views.base import get_error_msg
+
+    current_app.config["SHOW_STACKTRACE"] = False
+    try:
+        raise RuntimeError("sensitive internal detail: /etc/passwd")
+    except RuntimeError:
+        error_msg = get_error_msg()
+
+    assert "Stacktrace is hidden" in error_msg
+    # None of the typical traceback markers or the exception detail should
+    # leak into the response body.
+    assert "Traceback (most recent call last)" not in error_msg
+    assert "RuntimeError" not in error_msg
+    assert "sensitive internal detail" not in error_msg
+    assert "/etc/passwd" not in error_msg
+    assert 'File "' not in error_msg
+
+
+def test_get_error_msg_exposes_traceback_when_show_stacktrace_true():
+    """
+    Opt-in counterpart to
+    ``test_get_error_msg_hides_traceback_when_show_stacktrace_false`` —
+    locks in that tracebacks are only ever surfaced when an operator has
+    explicitly enabled ``SHOW_STACKTRACE``.
+    """
+    from superset.views.base import get_error_msg
+
+    previous = current_app.config.get("SHOW_STACKTRACE")
+    current_app.config["SHOW_STACKTRACE"] = True
+    try:
+        try:
+            raise RuntimeError("boom")
+        except RuntimeError:
+            error_msg = get_error_msg()
+    finally:
+        current_app.config["SHOW_STACKTRACE"] = previous
+
+    assert "Traceback (most recent call last)" in error_msg
+    assert "RuntimeError" in error_msg
+    assert "boom" in error_msg
+
+
 def test_sanitize_svg_content_safe():
     """Test that safe SVG content is preserved."""
     safe_svg = '<svg><rect width="10" height="10"/></svg>'
