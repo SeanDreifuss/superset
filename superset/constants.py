@@ -29,6 +29,19 @@ EMPTY_STRING = "<empty string>"
 
 CHANGE_ME_SECRET_KEY = "CHANGE_ME_TO_A_COMPLEX_RANDOM_SECRET"  # noqa: S105
 
+# Set of SECRET_KEY values that have shipped as defaults in Superset (or its
+# upstream Flask AppBuilder base) and are therefore public knowledge. Booting
+# with any of these allows session-cookie forgery (CVE-2023-27524), so the
+# startup guard refuses to run in production when SECRET_KEY matches any
+# entry here.
+KNOWN_INSECURE_SECRET_KEYS: frozenset[str] = frozenset(
+    {
+        CHANGE_ME_SECRET_KEY,
+        # Legacy Flask AppBuilder default named by CVE-2023-27524.
+        "\x02\x01thisismyscretkey\x01\x02\\e\\y\\y\\h",  # noqa: S105
+    }
+)
+
 # UUID for the examples database
 EXAMPLES_DB_UUID = "a2dc77af-e654-49bb-b321-40f6b559a1ee"
 

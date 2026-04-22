@@ -18,9 +18,11 @@
 import os
 from unittest.mock import MagicMock, patch
 
+import pytest
 from sqlalchemy.exc import OperationalError
 
 from superset.app import AppRootMiddleware, create_app, SupersetApp
+from superset.constants import KNOWN_INSECURE_SECRET_KEYS
 from superset.initialization import SupersetAppInitializer
 
 
@@ -257,3 +259,46 @@ class TestCreateAppRoot:
 
         assert isinstance(app.wsgi_app, AppRootMiddleware)
         assert app.wsgi_app.app_root == "/from-param"
+
+
+class TestCheckSecretKey:
+    """Regression tests for CVE-2023-27524 — refuse to boot on any
+    known-default SECRET_KEY, not just the current placeholder constant.
+    """
+
+    @pytest.mark.parametrize("insecure_key", sorted(KNOWN_INSECURE_SECRET_KEYS))
+    @patch("superset.initialization.is_test", return_value=False)
+    def test_exits_in_production_for_each_known_insecure_key(
+        self, mock_is_test: MagicMock, insecure_key: str
+    ) -> None:
+        mock_app = MagicMock()
+        mock_app.debug = False
+        mock_app.config = {"SECRET_KEY": insecure_key, "TESTING": False}
+        app_initializer = SupersetAppInitializer(mock_app)
+
+        with pytest.raises(SystemExit):
+            app_initializer.check_secret_key()
+
+    @pytest.mark.parametrize("insecure_key", sorted(KNOWN_INSECURE_SECRET_KEYS))
+    @patch("superset.initialization.is_test", return_value=False)
+    def test_only_warns_in_debug_mode(
+        self, mock_is_test: MagicMock, insecure_key: str
+    ) -> None:
+        mock_app = MagicMock()
+        mock_app.debug = True
+        mock_app.config = {"SECRET_KEY": insecure_key, "TESTING": False}
+        app_initializer = SupersetAppInitializer(mock_app)
+
+        app_initializer.check_secret_key()
+
+    @patch("superset.initialization.is_test", return_value=False)
+    def test_accepts_operator_chosen_secret_key(self, mock_is_test: MagicMock) -> None:
+        mock_app = MagicMock()
+        mock_app.debug = False
+        mock_app.config = {
+            "SECRET_KEY": "a-real-operator-chosen-random-value",
+            "TESTING": False,
+        }
+        app_initializer = SupersetAppInitializer(mock_app)
+
+        app_initializer.check_secret_key()
