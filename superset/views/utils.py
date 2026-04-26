@@ -63,12 +63,26 @@ if not feature_flag_manager.is_feature_enabled("ENABLE_JAVASCRIPT_CONTROLS"):
     REJECTED_FORM_DATA_KEYS = ["js_tooltip", "js_onclick_href", "js_data_mutator"]
 
 
+def _is_safe_redirect_target(target: str) -> bool:
+    """Return ``True`` when *target* is a relative, same-origin path.
+
+    Rejects any URL that specifies a network location (``netloc``) or a scheme
+    other than the empty string, which prevents open-redirect attacks that
+    redirect users to attacker-controlled domains after login.
+    """
+    parsed = parse.urlparse(target)
+    return not parsed.scheme and not parsed.netloc
+
+
 def redirect_to_login(next_target: str | None = None) -> FlaskResponse:
     """Return a redirect response to the login view, preserving target URL.
 
     When ``next_target`` is ``None`` the current request path (including query
     string) is used, provided a request context is available. The resulting URL
     always remains relative, mirroring Flask-AppBuilder expectations.
+
+    Any ``next_target`` that contains a scheme or network location (i.e. points
+    to an external host) is silently discarded to prevent open-redirect attacks.
     """
 
     login_url = appbuilder.get_url_for_login
@@ -82,7 +96,7 @@ def redirect_to_login(next_target: str | None = None) -> FlaskResponse:
         else:
             target = request.script_root + request.path
 
-    if target:
+    if target and _is_safe_redirect_target(target):
         query["next"] = [target]
 
     encoded_query = parse.urlencode(query, doseq=True)
