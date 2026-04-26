@@ -325,6 +325,9 @@ PROFILING = False
 # Superset allows server-side python stacktraces to be surfaced to the
 # user when this feature is on. This may have security implications
 # and it's more secure to turn it off in production settings.
+# The default MUST remain ``False`` to avoid information disclosure on
+# REST API errors (CVE-2023-39264). Only flip this to ``True`` in trusted
+# development environments.
 SHOW_STACKTRACE = False
 
 # Use all X-Forwarded headers when ENABLE_PROXY_FIX is True.
