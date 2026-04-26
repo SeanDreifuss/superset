@@ -22,7 +22,7 @@ from urllib.parse import parse_qs, urlparse
 from werkzeug.test import EnvironBuilder
 
 from superset.app import AppRootMiddleware
-from superset.views.utils import redirect_to_login
+from superset.views.utils import _is_safe_redirect_target, redirect_to_login
 from tests.integration_tests.base_tests import SupersetTestCase
 
 
@@ -155,3 +155,48 @@ class TestSubdirectoryDeployments(SupersetTestCase):
 
             assert "next" in query_params
             assert query_params["next"][0] == custom_target
+
+    # Open-redirect prevention tests (CVE-2023-42502)
+
+    def test_is_safe_redirect_target_allows_relative_paths(self):
+        """Relative paths are considered safe redirect targets."""
+        assert _is_safe_redirect_target("/superset/welcome/")
+        assert _is_safe_redirect_target("/dashboard/list/")
+        assert _is_safe_redirect_target("/superset/welcome/?foo=bar")
+        assert _is_safe_redirect_target("welcome/")
+
+    def test_is_safe_redirect_target_rejects_external_urls(self):
+        """External URLs with a scheme or netloc are rejected."""
+        assert not _is_safe_redirect_target("https://evil.com/phish")
+        assert not _is_safe_redirect_target("http://evil.com")
+        assert not _is_safe_redirect_target("//evil.com/path")
+        assert not _is_safe_redirect_target("ftp://evil.com/file")
+
+    def test_redirect_to_login_rejects_external_next_target(self):
+        """An external next_target must not appear in the login redirect URL."""
+        with self.app.test_request_context("/superset/welcome/"):
+            response = redirect_to_login(next_target="https://evil.com/phish")
+            parsed_url = urlparse(response.location)
+            query_params = parse_qs(parsed_url.query)
+
+            # The external target must be dropped entirely
+            assert "next" not in query_params
+
+    def test_redirect_to_login_rejects_protocol_relative_next_target(self):
+        """A protocol-relative next_target must not appear in the redirect."""
+        with self.app.test_request_context("/superset/welcome/"):
+            response = redirect_to_login(next_target="//evil.com/path")
+            parsed_url = urlparse(response.location)
+            query_params = parse_qs(parsed_url.query)
+
+            assert "next" not in query_params
+
+    def test_redirect_to_login_allows_relative_next_target(self):
+        """A relative next_target is preserved in the login redirect URL."""
+        with self.app.test_request_context("/superset/welcome/"):
+            response = redirect_to_login(next_target="/dashboard/list/")
+            parsed_url = urlparse(response.location)
+            query_params = parse_qs(parsed_url.query)
+
+            assert "next" in query_params
+            assert query_params["next"][0] == "/dashboard/list/"
